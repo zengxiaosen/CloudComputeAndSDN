@@ -1,0 +1,302 @@
+                    OpenDaylight学习 ( by quqi99 )
+
+
+作者：张华  发表于：2013-06-13
+版权声明：可以任意转载，转载时请务必以超链接形式标明文章原始出处和作者信息及本版权声明
+( http://blog.csdn.net/quqi99 )
+
+     在我看来，SDN的本质从技术上讲主要是下面三点：
+1）有一个控制器，用于将控制流和数据流分离。交换机向控制器请示将数据包往哪个端口转发。交换机和控制器之间的南桥协议有一个标准叫OpenFlow，但并不是所有厂家都愿意遵守标准的。OpenDayLight除了支持OpenFlow协议以外，也支持其他的一些协议。
+
+2）将租户tenant的概念做到了交换机之中。云计算的本质就是向租户租服务，服务对于租户应该是隔离的。传统的二层网络用VLAN做隔离，现在还要加上tenant做隔离。只不过以前tenant这个概念做在应用层，现在直接下层到L2层了。另外，VLAN有很多缺点（如vlan号只能对1-4094，这个对于公有云不合适，且需要配置实际物理交换机），所以可以通过像GRE之类的一些遂道技术再自定义帧头，在帧头中就可以自定义类似于vlan及tenant的隔离概念，就像一个应用程序一样，通过socket发出去，接收方再通过自定义协议解析数据。
+
+3）控制器向要提供北桥API，供用户调用来实现软件定义网络。
+
+
+
+、  经过今天一天对opendaylight的初步学习，达到了几下目的。
+
+1）opendaylight长成什么样子，它的原理熟悉了。除了CLI及REST APIs没有细看以外，其他high level一点的也都能理解了。
+
+2）虽然OpenStack的opendaylight插件的代码还没有出来，但能够想象它今后会怎么在openstack中运用。也清楚了这个插件怎么写的大致步骤。
+
+3）熟悉了mininet的用法，mininet是一个用在一台机器上模拟openflow实验环境的。它的实现原理是：采用root namespace做openflow交换机，其他的每一个host就是一个namespace，host与switch之间通过veth对等设备相连。
+
+     但由于opendaylight的文档非常不清晰，有一点不是太明白，导致后面的实验没有做：
+
+1）不清楚下列设置controller-node的命令的nodeA是怎么来的，nodeA应该是数据库的一个类似于uuid的值，但不清楚什么命令可以得到它。
+       oscp(config)# controller-node <nodeA>
+
+
+
+
+
+安装OpenDayLight控制器
+     可以从源码编译，也可以直接下载编译好的OpenDayLight Controller（https://jenkins.opendaylight.org/controller/job/controller-nightly/lastSuccessfulBuild/artifact/opendaylight/distribution/opendaylight/target/），我们选择直接从源码编译的方式：
+1, 安装maven,Java, ant ( sudo yum install ant)之类的软件,下面说maven的安装步骤：
+
+http://mirror.bit.edu.cn/apache/maven/maven-3/3.0.5/binaries/apache-maven-3.0.5-bin.zip
+
+解压后，直接在~/.bashrc文件中设置下列环境变量即可：
+
+export JAVA_HOME=/bak/java/jdk1.7.0_21
+
+export M2_HOME=/bak/java/apache-maven-3.0.5
+
+export MAVEN_OPTS="-Xms256m -Xmx512m"
+
+export PATH=$JAVA_HOME/bin:$M2_HOME/bin:$PATH
+
+
+
+2,下载OpenDayLightController的代码，并编译：
+
+Git clone https://git.opendaylight.org/gerrit/p/controller.git
+cd controller/opendaylight/distribution/opendaylight/
+mvn clean install (这步偶尔第一次执行会出错，出错后加-X参数再执行一遍就可以了）
+
+3, 启动OpenDayLightController,
+
+cd controller/opendaylight/distribution/opendaylight/target/distribution.opendaylight-0.1.0-SNAPSHOT-osgipackage/opendaylight
+./run.sh
+然后就可以在浏览器中访问链接http://localhost:8080
+
+4,（可选）eclipse开发环境环境建立如下：
+1）在eclipse中安装maven插件 (eclipse market里找maven integration for eclipse)
+2）导入“existing maven project”, 我将workspace设置为：/bak/opendaylight/controller
+3)  设置OSGI的target, controller/opendaylight/distribution/opendaylight/opendaylight.target
+4)  以debug模式启动opendaylight-osgi-launcher
+5）opendaylight Gerrit的地址,https://git.opendaylight.org/gerrit/
+
+或者用其他openflow控制器，如floodlight, http://docs.projectfloodlight.org/display/floodlightcontroller/Installation+Guide
+$ git clone git://github.com/floodlight/floodlight.git
+$ cd floodlight
+$ git checkout fl-last-passed-build
+$ ant
+$java -jar target/floodlight.jar # run Floodlight
+http://localhost:8080/ui/index.html
+
+安装mininet
+mininet目前不能运行在64位系统上，不得不下载virtualbox镜像 http://floodlight.openflowhub.org/files/floodlight-vm.zip
+
+启动mininet,并连接控制器
+sudo mn  --controller=remote --ip=192.168.99.104  --port=6633 --mac --topo=tree,depth=2
+或简单的，sudo mn --controller=remote --ip=192.168.99.104 --port=6633
+root@localhost:/home/floodlight# dpctl show tcp:127.0.0.1:6634
+
+features_reply (xid=0xc1d3ddd4): ver:0x1, dpid:1
+
+n_tables:2, n_buffers:256
+
+features: capabilities:0x87, actions:0xfff
+
+ 1(s1-eth1): addr:f2:91:cb:40:c7:5a, config: 0, state:0
+
+     current:    10GB-FD COPPER 
+
+ 2(s1-eth2): addr:1a:91:f7:1e:2a:be, config: 0, state:0
+
+     current:    10GB-FD COPPER 
+
+ 3(s1-eth3): addr:16:04:cc:cb:59:de, config: 0, state:0
+
+     current:    10GB-FD COPPER 
+
+ LOCAL(dp0): addr:00:23:20:89:2d:61, config: 0x1, state:0x1
+
+get_config_reply (xid=0x9f508db3): miss_send_len=0
+
+root@localhost:/home/floodlight# dpctl dump-flows tcp:127.0.0.1:6634
+
+stats_reply (xid=0x77dd14d8): flags=none type=1(flow)
+
+
+root@localhost:/home/floodlight# sudo dpctl add-flow tcp:127.0.0.1:6634 in_port=1,idle_timeout=360,actions=output:2
+
+root@localhost:/home/floodlight# dpctl dump-flows tcp:127.0.0.1:6634
+
+stats_reply (xid=0x469554d): flags=none type=1(flow)
+
+  cookie=0, duration_sec=2s, duration_nsec=939000000s, table_id=0, priority=32768, n_packets=0, n_bytes=0, idle_timeout=360,hard_timeout=0,in_port=1,actions=output:2
+
+
+
+
+
+OpenDaylight SDN Controller Platform (OSCP)
+注意，OpenDayLight Controller和OSCP实际上2个独立的SDN控制器项目（分别由Cisco和BigSwitch承当）。不过，BigSwitch于6月份退出OpenDayLight（降级为silver member），OSCP这个项目基本上也就废弃了（从2013-06起就没有更新过）
+git clone ssh://veryhua2006@git.opendaylight.org:29418/net-virt-platform.git
+./setup.sh
+make
+java -jar target/sdnplatform.jar 
+source ./workspace/ve/bin/activate 
+make stop-sdncon reset-cassandra start-sdncon (OSCP REST APIs实现在一个单纯的进程sdncon中)
+java -jar sdnplatform/target/sdnplatform.jar
+
+
+GUI地址：http://192.168.99.100:8000/ 
+
+运行CLI命令 ( https://wiki.opendaylight.org/view/OpenDaylight_Command-Line_Interface_(CLI):Main)：
+[hua@laptop net-virt-platform]$ cd cli/
+
+[hua@laptop cli]$ ./cli.py 
+
+version200
+
+default controller: 127.0.0.1:8000, SDN OS 1.0 - custom version
+
+laptop> help
+
+For help on specific commands type help <topic>
+
+Commands:
+
+  clearterm   Clears and resets the terminal screen
+
+  connect     Connect to a controller's REST API
+
+  date        Display current date and time
+
+  debug       Manage various cli debugging features
+
+  echo        Echo remaining arguments
+
+  enable      Enter enable mode
+
+  exit        Exit current mode
+
+  help        Help on commands or topics
+
+  history     Display history of commands
+
+  logout      Exit from cli
+
+  no          Delete or disable configuration parameters
+
+  ping        ping a switch or ip address
+
+  set         Manage CLI sessions settings
+
+  show        Show links, controller managed switch to switch interfaces
+
+  test        Perform various tests on the network
+
+  trace       Determine the L3 path to some destination
+
+  traceroute  Determine the L3 path to some destination
+
+  tunnel-link
+
+  version
+
+  watch       Iterate indicated command displaying results
+
+laptop> show switch
+
+# Switch DPID             Alias Connected Since         IP Address     Tun Capable -Enabled -State   Core Switch
+
+-|-----------------------|-----|-----------------------|--------------|-----------|--------|--------|-----------
+
+1 00:00:00:00:00:00:00:01       2013-06-23 17:34:35 CST 192.168.99.104 False       False disabled False
+
+laptop> show host
+
+# MAC Address       Address Space VLAN IP Address Switch/OF Port (Physical Port)      Tag Last Seen
+
+-|-----------------|-------------|----|----------|-----------------------------------|---|---------
+
+1 32:a7:38:9c:83:9b default            Unknown    00:00:00:00:00:00:00:01/1 (s1-eth1)     0 minute
+
+2 ae:60:9e:e8:38:9b default            Unknown    00:00:00:00:00:00:00:01/2 (s1-eth2)     0 minute
+
+3 b2:04:d3:3c:d9:79 default            Unknown    00:00:00:00:00:00:00:01/3 (s1-eth3)     0 minute
+
+laptop> show link
+
+None.
+
+
+eclipse:
+1) make eclipse
+2) Import "sdnplatform" project into any eclipse workspace
+
+
+OpenDaylight Network virtualization (ONV)
+ONV是运行在OSCP平台上的一个NaaS应用，坐标相当于OpenStack Neutron。
+
+它具有：
+
+      1. tenant隔离
+
+3层路由功能
+
+Opendaylight的quantum插件调用ONV的北桥APIs
+
+
+
+OpenDaylight Neutron插件
+      今后opendaylight会往社区提供一个插件，位于neutron/plugin/oscp，它有一个RestProxy会去调OSCP的RESTAPIs，有点类似于floodlight的那个rest插件，不过好像代码还没提交进去，我们先猜测一下它的用法。估计用devstack的话，配置得至少多出几列几项：
+
+enable_service oscp
+Q_PLUGIN=oscp
+BS_FL_CONTROLLERS_PORT=<ip_address:port>
+BS_FL_CONTROLLER_TIMEOUT=10
+
+
+这些步骤分解的话，应该是：
+
+1）配置所有节点上的OVS使用openflow控制器
+
+NETWORK_CONTROLERS=<comma-seperated-list-of-network-ctrls>
+sudo ovs-vsctl \--no-wait \-\- \--if-exists del-br br-int
+sudo ovs-vsctl \--no-wait add-br br-int
+sudo ovs-vsctl \--no-wait br-set-external-id br-int bridge-id br-int
+for ctrl in `echo ${NETWORK_CONTROLERS} \| tr ',' ' '`
+do
+ sudo ovs-vsctl set-controller br-int "tcp:${ctrl}:6633"
+done
+2）数据库及配置
+
+$ mysql -u root -p$PASS -e 'DROP DATABASE IF EXISTS oscp_neutron;'
+$ mysql -u root -p$PASS -e 'CREATE DATABASE IF NOT EXISTS oscp_neutron;'
+vi /etc/quantum/neutron.conf
+
+[DEFAULT]
+core_plugin = neutron.plugins.oscp.plugin.RestProxy
+allow_overlapping_ips = False
+lock_path = <path_to_which_neutron_process_can_write_to>
+vi /etc/neutron/plugins/oscp/restproxy.ini
+[DATABASE]
+sql_connection = mysql://<username>:<password>@<database_ip>:3306/restproxy_neutron
+[RESTPROXY]
+servers=<controller_ip:port_num>,<controller_ip:port>
+serverauth=<username>:<password>
+serverssl=False
+vi /etc/nova/nova.conf
+
+libvirt_vif_type=ethernet
+libvirt_vif_driver=nova.virt.libvirt.vif.LibvirtHybridOVSBridgeDriver
+3)启动
+neutron-server --config-file /etc/neutron/neutron.conf --config-file /etc/neutron/plugins/oscp/restproxy.ini
+
+要开放控制节点提供REST接口的端口，好像neutron插件能访问：https://wiki.opendaylight.org/view/OpenDaylight_Network_Virtualization_(ONV):OpenStack
+
+OpenDaylight的文档不是很清晰，暂不清楚下面的nodeA的值怎么得来？
+
+oscp> enable
+oscp# configure
+oscp(config)# controller-node <nodeA>
+oscp(config-controller)# interface Ethernet 0
+oscp(config-controller-if)# firewall allow  web
+用命令行查看：show controller-node all
+用RESTAPI查看：http://192.168.99.100:8000/rest/v1/model/controller-node
+
+如果它要用到外部网关的话，也得像用neutron的cli命令那样调用OSCP的CLI命令配置外部网关，见：https://wiki.opendaylight.org/view/OpenDaylight_OpenStack_Quantum_Plugin:Main
+
+链接：
+
+REST API doc,https://wiki.opendaylight.org/view/OpenDaylight_SDN_Controller_Platform_(OSCP):Rest_Reference
+
+CLI doc,
+
+ https://wiki.opendaylight.org/view/OpenDaylight_Command-Line_Interface_(CLI):Main
