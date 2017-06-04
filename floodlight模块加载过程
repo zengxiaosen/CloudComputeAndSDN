@@ -1,0 +1,115 @@
+模块加载部分：
+
+core/module/FloodlightModuleLoader.java  =>  (396 – 403)
+loadModulesFromList函数
+
+for (IFloodlightModule module : moduleSet) {
+// init the module
+if (logger.isDebugEnabled()) {
+logger.debug("Initializing " + module.getClass().getCanonicalName());
+}
+module.init(floodlightModuleContext);
+}
+
+循环加载启动列表中的模块。其中module.init(floodlightModuleContext);执行
+
+core/module/IFloodlightModule.java => (77 – 88)
+Interface，转换到模块override的init函数。
+
+void init(FloodlightModuleContext context) throws FloodlightModuleException;
+
+/**
+* This is a hook for each module to do its external initializations,
+* e.g., register for callbacks or query for state in other modules
+*
+* It is expected that this function will not block and that modules that want
+* non-event driven CPU will spawn their own threads.
+*
+* @param context
+* @throws FloodlightModuleException
+*/
+
+随后执行初始化完成的组件中的startUp函数。对于如下的事件绑定代码
+
+floodlightProvider.addOFMessageListener(OFType.PACKET_IN, this);
+
+core/internal/Controller.java ==> (1451 – 1460)
+
+//line 149 声明messageListeners实例
+protected ConcurrentMap>
+messageListeners;
+//line 1446
+// ***************
+// IFloodlightProvider
+// ***************
+
+@Override
+public synchronized void addOFMessageListener(OFType type,
+IOFMessageListener listener) {
+ListenerDispatcher ldd =
+messageListeners.get(type); //从messageListeners中获取tpye事件的监听列表
+if (ldd == null) { //先检测对应事件列表ldd是否为空
+ldd = new ListenerDispatcher();
+messageListeners.put(type, ldd);
+}
+ldd.addListener(type, listener);
+}
+
+其中，ldd是事件注册列表（具体属性：listeners ArrayList (id=187)）。ListenerDispatcher类的具体定义位置是core/util/ListenerDispatcher.java。Debug中，PacketIn事件的监听模块默认为：
+
+
+elementData Object[10] (id=189)
+[0] LinkDiscoveryManager (id=193)
+[1] TopologyManager (id=200)
+[2] DeviceManagerImpl (id=207)
+[3] Firewall (id=213)
+[4] LoadBalancer (id=66)
+[5] Forwarding (id=218)
+[6] null
+...
+
+事件加入函数
+
+core/util/ListenerDispatcher.java ==> (71 – 107)
+
+//line 38
+List listeners = null;
+
+//line 71
+public void addListener(U type, T listener) {
+List newlisteners = new ArrayList();
+if (listeners != null) //listeners列表是否为空(当前监听者列表)
+newlisteners.addAll(listeners);//将原列表中信息复制进来
+
+newlisteners.add(listener);
+// Find nodes without outgoing edges
+List terminals = new ArrayList();
+for (T i : newlisteners) {
+boolean isterm = true;
+for (T j : newlisteners) {
+if (ispre(type, i, j)) {
+isterm = false;
+break;
+}
+}
+if (isterm) {
+terminals.add(i);
+}
+}
+
+if (terminals.size() == 0) {
+logger.error("No listener dependency solution: " +
+"No listeners without incoming dependencies");
+listeners = newlisteners;
+return;
+}
+
+// visit depth-first traversing in the opposite order from
+// the dependencies. Note we will not generally detect cycles
+HashSet visited = new HashSet();
+List ordering = new ArrayList();
+for (T term : terminals) {
+visit(newlisteners, type, visited, ordering, term);
+}
+listeners = ordering;
+}
