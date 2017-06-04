@@ -1,0 +1,82 @@
+有关 OpenFlow/SDN 的小总结
+
+从去年5月份开始接触OpenFlow/SDN，到现在已经折腾了一年多。期间看了很多材料，读了很多文章，也听了很多分析。正好最近需要整理一下思路，于是把能想到的东西按条目列了出来。大神路过拍砖的话麻烦轻点~
+
+1、SDN 是什么？
+
+a) 用middlebox 的角度，就是将转发，连带其他所有功能的配置/信息通完全过软件控制/定义/配置（UWM）
+b) 从系统架构的角度，给出系统抽象，形成累X86 架构的系统结构（Nick）
+c) 从网络的角度，是数据、控制平面分离
+d) 从云/数据中心的角度，是终于能够虚拟化一切的快感（OpenStack-Quantum, VMware-vSphere,优化Hadoop-IBM&Rice）
+e) 从网络设备提供商的角度，是设备白菜化，是Google 等开源节流省钱的优先选择
+f) 从网络运营商的角度，是今后省钱，省屌丝的利器
+
+2、OpenFlow 是什么？
+
+a) 是软件定义网络的一种实现方式
+b) 是交换机与控制器信息交互的一种协议
+c) 特点是流控制
+d) 缺少管理能力（参考SNMP）
+
+i. ODL Proposal SNMP4SDN
+ii. ONF有这方面的考虑，也提出了管理协议，只是目前已知的控制器都没有implementation。
+iii. 目前的辅助管理协议有：The Open vSwitch Database Management Protocol，OpenFlow Configuration and Management Protocol
+
+3、OpenFlow/SDN 的应用？
+
+a) 简化网络配置难度（目前主要是在DCN 中）
+b) 简化网络管理难度（也是在DCN 中）
+
+i. UCSD的Hedera，动态流控制
+ii. Flow Measurement，Princeton+USC这边做了OpenSketch，很多其他学校也在做。流控成熟之后，就能方便上层应用提供更为智能的管理模式。
+
+c) 广域网TE，Google及微软都在内部WAN采用SDN提高链路带宽利用率（G家提升到90%以上，对比参考传统MPLS一半左右的利用率）
+d) 为上层应用提供了网络虚拟化（IaaS的重要元素）
+e) 提供了学术研究的平台（testbed@北邮、清华、福州大学），当然也有水论文的机会
+f) 创业（这方面清华还是很有心得的）
+
+4、OpenFlow/SDN 的前景？
+
+a) 网络管理/安全/..等应用的开发（屌丝们的新阵地）
+b) 提升网络性能（QoS, QoE, 云, etc.）
+
+i. MPTCP，SC12中CIT和CERN做了一个DEMO。他们基于floodlight实现了支持多径的控制器。另外，西北大学、台湾成功大学+高雄大学、台湾高性能计算所、SARA、SURFnet等也都做了相关研究。[paper]
+ii. Load Balancing，早在SC11，Indiana U就已经展示了他们的FlowScale系统[主页]。FlowScale现在也是IU入侵检测系统开发计划中的一部分。
+
+c) 鼓励/引领创新
+d) 目光短浅，剩下就不知道了…
+
+5、OpenFlow/SDN 的问题？
+
+a) 系统
+
+i. 控制器层面加入管理能力
+ii. 北向API 定义的竞争与局限（标准&IETF）
+iii. 控制器安全
+
+b) 架构（集中式与分布式的长期之争）
+
+i. 逻辑中心化+物理分布式的tradeoff（TU Berlin& UCB& Stanford）
+ii. “控制虚拟机”的状态/信息转移及判定方法（UWM, 细化了上面的讨论）
+iii. 多控制器（Stanford: Placement problem）
+iv. 控制器分层（UT: Kandoo）
+v. 现网融合（VXLAN,因为组播,Cisco 各种被Juniper 吐槽…）
+
+c) 原理
+
+i. TCAM 的局限（MSRA+CPU; OpenFlow 的问题，也是网管问题的来源）。12年12月的采访中，Nicira创始人Martin Casado认为，OpenFlow在DCN中的实现应该基于Virtual Switch，而不是硬件OF交换机。
+ii. 对应于DPI（深度包解析）的支持（有人认为可以，有人认为不行）。不过，12年12月的SDN高峰会上，武汉绿网展示了基于X86平台的OpenFlow DPI解决方案，性能可以达到10Mpps、40Gbps。
+
+d) 应用
+
+i. 流表冲突检测（TAMU HotSDN 12，虽说主要是’Security Enforcement Kernel’，但是还是有部分内容处理流表项冲突）
+ii. 攻击防范（e.g. Sigcomm 2012[HotSDN]，北卡夏洛特）
+iii. 管理功能の部署（Stanford,似乎是参与设计NetFPGA 的清华GG 在做这个诶,prototype:精灵…膜拜）
+
+ 
+
+更新历史：
+2013-07-23 更新 2.d，添加现有管理协议； 添加 3.c； 修改 5.a.i
+2014-01-16 添加链接 5.d.i
+2014-01-26 更新The Open vSwitch Database Management Protocol RFC文档链接
+2014-02-19 添加链接 2.d.i
