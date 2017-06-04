@@ -1,0 +1,99 @@
+关于VXLAN的更多资料，请参考：
+1、关于VXLAN与异构云之间的集成
+2、开发人员必读openstack网络基础5:网络叠加模式VLAN、VxLAN、GRE
+
+
+一、 VXLAN能解决哪些问题
+1、服务器虚拟化技术，允许在物理机上运行多个MAC地址各不相同的虚拟机，随着数量的增加，交换机上的MAC地址表将剧烈膨胀，甚至需要MAC覆盖。
+2、数据中心多以VLAN为虚拟机划分网络，但是VLAN数量受制于VLAN(802.1Q)协议4096，这远远满足不了现实的需求。
+3、多租户环境的要求，其每个租户都有自己隔离的网络环境，导致物理网络中每个租户所分配的MAC地址和VLAN ID会存在重叠的可能。
+4、Spanning Tree Protocol (STP)算法会产生大量多路路径冗余。
+5、支持远距离虚拟机迁移，避免处理复杂的L2 (VLAN)网络环境。
+6、ToR(Top of Rack) Switch链接着物理server，它记录着各个server/VM相连的MAC地址映射表。当地址映射表满时，ToR就会停止学习新的地址，这样就会导致网络泛洪，直到有记录过期被换出，腾出空闲表项。
+
+
+二 、VXLAN介绍
+VXLAN(Virtual eXtensible Local Area Network)是一种将二层报文用三层协议进行封装的技术，可以对二层网络在三层范围进行扩展。每个覆盖域被称为VXLAN segment，它的ID是由位于VXLAN数据包头中的VXLAN Network Identifier(VNI)标识的。VNI字段包含24 bits，故segments最大数量为2的24次方，约合16M个。并且只有在相同VXLAN segment内的虚拟机之间才可以相互通信。
+根据VXLAN的封包方式，也可以将它看做一种隧道模式的网络覆盖技术，这种隧道是无状态的。隧道端点VTEP (VXLAN Tunnel End Point - an entity which originates and/or terminates VXLAN tunnels)，它一般位于拥有虚拟机的hypervisor宿主机中，因此VNI(VXLAN Network Identifier or VXLAN Segment ID)和VXLAN隧道只有VTEP可见，对于虚拟机是透明的，那么不同的VXLAN segment中就允许具有相同MAC地址的虚拟机。并且VTEP也可以位于物理交换机或物理主机中，甚至可以使用软件来定义。VTEP (单播时是两个VTEP或多播时是多个VTEP)之间完全是通过L3协议交互的，这也就意味着VTEP间可以由Router相连，而非类似于GRE模式的固定端到端隧道连接。
+
+
+三 、VXLAN Frame Format
+  
+
+(1)     Inner Ethernet Header[8+8+4]20字节
+  
+   Inner Dest MAC Address：目的虚拟机的MAC地址。
+   Inner Source MAC Address：源虚拟机的MAC地址。
+Optional Ethertype：可选的VLAN tag。
+
+(2)VXLAN Header[1+3+3+1]8字节
+  
+Flags(8 bits) ：I标记位(从左到右第5个bit)必须设置为1，其余7个R标记位置0。
+    VXLAN Network Identifier(VNI) ：24bit的值，用来标识VXLAN覆盖网络的编号。
+    Reserved fields：24 bits + 8 bits，置为0有效。
+
+(3)Outer UDP Header[2+2+2+2]8字节
+  
+     Source端口：由VTEP提供，端口值由hash算法计算所得。
+     Dest端口：为了网络的交互特性，一般设置为4789。
+     UDP校验和：一般为0，非0则此包将会被丢弃。
+
+(4)Outer IP Header[4+4+12]20字节
+  
+    Outer Source IPv4 Address：发送端VTEP(见上文介绍)的IP地址。
+    Protocl：置为0x11(即17)表明包含UDP包。
+Outer Dest IPv Address：可以是单播也可以是多播地址。大多数情况是目标接收端VTEP的IP地址，如果没有则会执行ARP请求来获取，具体步骤如下：
+        1：目标IP被替换为与源虚拟机具有相同VNI的多播组IP地址。
+2：所有的VTEP端都接收此多播包，VTEP查找所在主机上的全部虚拟机来匹配源虚拟机的Inner Dest MAC Address。
+        3：目标VTEP上的虚拟机会回应这个多播包，从而获知目标VTEP IP地址。
+4：发送端VTEP添加(VNI -- VTEP -- 虚拟机MAC地址)映射关系到自己的VXLAN表中，避免再次组播学习过程。
+
+    (5)Outer Ethernet Header[6+6+4+2]18字节
+  
+          Outer Dest MAC Address：一般被设置为接收端VTEP设备的MAC地址，或者下一跳设备端口的MAC地 址。(纯粹的L3网络传输过程)
+          Outer Source MAC Address：发送端VTEP设备的MAC地址。
+          OptnlEthtype VLAN：指定Ethertype为0x8100，并且指定VLAN tag。
+
+
+四 、VXLAN网络中VM间通信过程
+在VXLAN模式的网络环境中：源虚拟机发送出去的L2数据包(Inner Ethernet Header + Payload)，由send VTEP使用VXLAN Header (由VNI标识所属的segment)将L2数据包封装，然后依次追加UDP Header + 标准IP Header + 标准MAC Header；发出后由L3协议通过标准IP Header转发；根据UDP目的端口发现VXLAN包头，匹配VNI找到receives VTEP；最后receives VTEP解包，由L2数据包头找到目标虚拟机，交互Payload数据。
+
+VM间通信举例：
+
+  
+
+VM1要向VM2发送数据前，必须要知道VM2的MAC地址，其获取过程如下：
+         1、VM1发送ARP请求包，请求192.168.0.101[VM2_IP]的MAC地址；
+         2、ARP请求包被VTEP1封装成多播包，发给VNI=864的多播组；
+         3、所有的VTEP接收此多播包，并添加(VNI–VTEP1–VM1_MAC Address)映射关系到自己的VXLAN表中；
+         4、目的主机上的VTEP2接收到多播包后将其解开，并向本主机上VNI=864的所有虚拟机发送广播包；
+         5、VM2看到了ARP包后，回应了自己的MAC地址；
+         6、VTEP2再次封装回应的单播包，通过路由发给VTEP1；
+         7、VTEP1解包，并将包传给VM1，则最终获取了VM2的MAC地址；
+         8、VTEP1将(VNI–VTEP2–VM2_MAC Address)映射关系添加到自己的VXLAN表中；
+
+VM1获知VM2的MAC地址后，发送数据包，过程如下：
+1、  VM1发送IP数据包到VM2，即192.168.0.100 到 192.168.0.101；
+2、  VTEP1查找自己的VXLAN表知道要发给VTEP2，然后依次封装以下数据包头；
+a)VXLAN包头，VNI=864；
+b)标准UDP包头，校验和checksum为0x0000，目标端口号4789；
+c)标准IP包头，目标地址为VTEP2的IP地址，协议号设为0x11表面为UDP包。
+d)标准MAC数据包，目标地址为下一跳设备的MAC地址00:10:11:FE:D8:D2，可路由到目标隧道端VTEP2。
+3、  VTEP2接收数据包，根据UDP的destination端口找到VXLAN数据包。接着查找所有所在VXLAN的VNI为864的端口组，找到VM2的
+4、  VM2接收并处理数据包，拿到Payload数据。
+
+
+五 、VXLAN的部署场景
+         VXLAN && VXLAN
+  
+         VXLAN多用于数据中心的虚拟机化环境中，可以穿越机架甚至是数据中心。如上图两个宿主机Server1和Server2，它们可以位于同一个机架也可以位于不同机架，还可以位于不同的数据中心，只要直接由L3网络相连即可，其本质是VETP可以跨越L3。
+上图中有4个VXLAN覆盖网络:
+VNI=11表示为[{Server1[VM1-1]}, {Server2[VM2-4]}]
+VNI=34表示为[{Server1[VM1-2]}, {Server2[VM2-1]}]
+VNI=74表示为[{Server1[VM1-3]}, {Server2[VM2-2]}]
+VNI=98表示为[{Server1[VM1-4]}, {Server2[VM2-3]}]
+
+         VXLAN && non-VLXAN
+  
+
+         VXLAN网络和非VXLAN网络互连就得需要VXLAN gateway，非VXLAN一般为VLAN类型网络。VXLAN网关会剥去数据包的VXLAN包头，将数据包发送到端口MAC地址与Inner Destination MAC Address相同的端口完成数据传输。如果non-VXLAN网络环境使用的VLAN协议，则应该注意Inner Ethernet Header中的VLAN ID设置，总之无论数据是进还是出，VLAN ID不用时可以丢弃不管，使用时必须正确指定。值得说明的是：VXLAN网关可用硬件实现，也可以用软件实现。
